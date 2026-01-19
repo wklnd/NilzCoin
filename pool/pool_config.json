@@ -1,0 +1,13 @@
+{
+  "node_url": "http://127.0.0.1:5000",
+  "host": "0.0.0.0",
+  "port": 8000,
+  "job_ttl_seconds": 90,
+  "job_refresh_seconds": 5,
+  "share_target_multiplier": 16,
+  "reward_address": "nilzNWH4DWSUFWbP94NyafGbfd5n51N6JWbE8y", 
+  "pool_fee_percent": 1.5,
+  "payout_min_amount": 0.1,
+  "payout_interval_seconds": 60,
+  "description": "NilzCoin original pool. "
+}

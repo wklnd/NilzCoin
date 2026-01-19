@@ -1,0 +1,7 @@
+{
+    "wallet_address": "nilzNWDDF6gwLHRENEVHPqdj8SqyaviJSo51Pk",
+    "pool_address": "http://127.0.0.1:8000",
+    "worker_name": "mainpc",
+    "threads": 4,
+    "stats_interval": 30
+}

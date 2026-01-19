@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>NilzCoin Blockchain Explorer</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+:root {
+    color-scheme: dark;
+    --bg:#121417; --panel:#1d2229; --border:#2e3640; --accent:#3aa3ff; --accent2:#ffb347;
+    --danger:#ff5f56; --ok:#4caf50; --font:system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Ubuntu;
+}
+* { box-sizing:border-box; }
+body {
+    margin:0; font-family:var(--font); background:var(--bg); color:#d9e2ec;
+    line-height:1.4;
+}
+header {
+    padding:1rem 1.25rem; background:#0d1012; border-bottom:1px solid var(--border);
+    display:flex; flex-wrap:wrap; gap:.75rem; align-items:center;
+}
+h1 { font-size:clamp(1.2rem,2.2vw,1.6rem); margin:0; font-weight:600; letter-spacing:.5px; }
+#stats { font-size:.8rem; opacity:.8; }
+input, button, select {
+    background:var(--panel); border:1px solid var(--border); color:#fff;
+    padding:.55rem .7rem; border-radius:6px; font-size:.85rem;
+}
+input:focus, button:focus { outline:2px solid var(--accent); outline-offset:2px; }
+button { cursor:pointer; font-weight:500; }
+button.primary { background:var(--accent); border:1px solid var(--accent); color:#fff; }
+button.secondary { background:#27303a; }
+main { padding:1rem 1.25rem 4rem; max-width:1400px; margin:0 auto; }
+#blocks { display:grid; gap:.75rem; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); }
+.block {
+    background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:.8rem .9rem;
+    display:flex; flex-direction:column; gap:.45rem; position:relative;
+}
+.block header { background:transparent; border:none; padding:0; display:flex; flex-direction:column; gap:.35rem; }
+.block .hash { font-family:monospace; font-size:.7rem; word-break:break-all; }
+.block .prev { font-family:monospace; font-size:.65rem; word-break:break-all; opacity:.6; }
+.badge {
+    display:inline-block; padding:.2rem .45rem; font-size:.55rem; border-radius:4px;
+    background:#27303a; letter-spacing:.5px; text-transform:uppercase;
+}
+.badge.mined { background:var(--ok); }
+.badge.genesis { background:var(--accent2); color:#222; }
+.toggleTx {
+    background:#27303a; border:1px solid #36424f; font-size:.65rem; padding:.25rem .5rem;
+    border-radius:4px; cursor:pointer; align-self:flex-start;
+}
+.transactions {
+    margin-top:.4rem; border-top:1px solid var(--border); padding-top:.4rem;
+    max-height:260px; overflow:auto; scrollbar-width:thin;
+}
+.tx {
+    font-family:monospace; font-size:.65rem; padding:.25rem .35rem; border:1px solid #27333c;
+    background:#161b21; border-radius:4px; margin-bottom:.35rem; word-break:break-all;
+}
+.hidden { display:none !important; }
+#searchBar {
+    display:flex; flex-wrap:wrap; gap:.5rem; width:100%; margin-left:auto;
+}
+#searchInput { flex:1 1 240px; }
+#filters { display:flex; gap:.4rem; flex-wrap:wrap; }
+footer {
+    position:fixed; bottom:0; left:0; right:0; background:#0d1012; border-top:1px solid var(--border);
+    padding:.4rem .9rem; font-size:.65rem; display:flex; justify-content:space-between; align-items:center;
+}
+.loader {
+    width:42px; aspect-ratio:1; border-radius:50%; display:grid; place-items:center;
+    background:conic-gradient(#0000,#000) content-box;
+    mask:radial-gradient(farthest-side,#0000 calc(100% - 6px),#000);
+    animation:spin 1s linear infinite;
+}
+@keyframes spin { to { transform:rotate(1turn); } }
+#status { display:flex; align-items:center; gap:.6rem; }
+.empty { text-align:center; opacity:.6; padding:2rem 0; grid-column:1/-1; }
+.highlight { outline:2px solid var(--accent); }
+#paging { margin:1rem 0 .25rem; display:flex; gap:.4rem; flex-wrap:wrap; align-items:center; }
+#paging button { font-size:.65rem; }
+.paginationInfo { font-size:.65rem; opacity:.7; }
+</style>
+</head>
+<body>
+<header>
+    <h1>NilzCoin Blockchain Explorer</h1>
+    <div id="stats">Loading...</div>
+    <div id="searchBar">
+        <input id="searchInput" placeholder="Search by block index / hash / tx id / address ..." autocomplete="off" />
+        <div id="filters">
+            <select id="sortSelect" title="Sort">
+                <option value="desc">Newest First</option>
+                <option value="asc">Oldest First</option>
+            </select>
+            <button id="clearSearch" class="secondary" title="Clear">Clear</button>
+            <button id="refresh" class="primary" title="Refresh">Refresh</button>
+        </div>
+    </div>
+</header>
+<main>
+    <div id="paging" class="hidden">
+        <button id="prevPage">&larr; Prev</button>
+        <button id="nextPage">Next &rarr;</button>
+        <span class="paginationInfo" id="pageInfo"></span>
+        <label style="font-size:.6rem; display:flex; align-items:center; gap:.25rem;">Per page
+            <select id="perPage" style="font-size:.6rem; padding:.2rem .3rem;">
+                <option>25</option><option>50</option><option selected>100</option><option>250</option><option>500</option>
+            </select>
+        </label>
+    </div>
+    <div id="blocks"></div>
+</main>
+<footer>
+    <div id="status"><span id="statusText">Idle</span></div>
+    <div>Cached: <span id="cacheInfo">none</span></div>
+</footer>
+<script>
+// NilzCoin Explorer Script
+// Attempts pool first (/blockchain.json), falls back to node (/chain)
+// Normalizes field names (snake_case vs camelCase) for rendering.
+(function(){
+    const POOL_BASE = window.POOL_BASE || window.location.origin;
+    const NODE_BASE = window.NODE_BASE || 'http://127.0.0.1:5000';
+
+    const els = {
+        blocks: document.getElementById('blocks'),
+        stats: document.getElementById('stats'),
+        status: document.getElementById('statusText'),
+        cache: document.getElementById('cacheInfo'),
+        search: document.getElementById('searchInput'),
+        sort: document.getElementById('sortSelect'),
+        clear: document.getElementById('clearSearch'),
+        refresh: document.getElementById('refresh'),
+        prev: document.getElementById('prevPage'),
+        next: document.getElementById('nextPage'),
+        perPage: document.getElementById('perPage'),
+        paging: document.getElementById('paging'),
+        pageInfo: document.getElementById('pageInfo')
+    };
+
+    let chain = []; // normalized blocks
+    let filtered = [];
+    let page = 1;
+
+    function setStatus(t){ els.status.textContent = t; }
+
+    async function fetchChain(){
+        setStatus('Fetching pool...');
+        try {
+            const r = await fetch(POOL_BASE + '/blockchain.json', {cache:'no-store'});
+            if(!r.ok) throw new Error('Pool response ' + r.status);
+            const data = await r.json();
+            return normalizeData(data, 'pool');
+        } catch(e){
+            console.warn('Pool fetch failed, falling back to node:', e.message);
+        }
+        setStatus('Fetching node...');
+        try {
+            const r2 = await fetch(NODE_BASE + '/chain', {cache:'no-store'});
+            if(!r2.ok) throw new Error('Node response ' + r2.status);
+            const data2 = await r2.json();
+            return normalizeData(data2, 'node');
+        } catch(e2){
+            setStatus('Failed');
+            throw e2;
+        }
+    }
+
+    function normalizeData(raw, source){
+        let arr = Array.isArray(raw) ? raw : Array.isArray(raw.chain) ? raw.chain : [];
+        return arr.map(b => ({
+            index: b.index ?? b.height ?? 0,
+            hash: b.hash,
+            previousHash: b.previousHash ?? b.previous_hash ?? b.prev_hash ?? null,
+            nonce: b.nonce,
+            difficulty: b.difficulty ?? b.target ?? null,
+            timestamp: b.timestamp ?? b.time ?? null,
+            transactions: (b.transactions || []).map(tx => ({
+                id: tx.id || tx.hash || tx.txid,
+                from: tx.from,
+                to: tx.to,
+                amount: tx.amount,
+                type: tx.type || 'transfer',
+                timestamp: tx.timestamp || null
+            }))
+        })).sort((a,b)=> b.index - a.index); // newest first
+    }
+
+    function applyFilters(){
+        const q = (els.search.value || '').trim().toLowerCase();
+        filtered = chain.filter(b => {
+            if(!q) return true;
+            if(String(b.index) === q) return true;
+            if(b.hash && b.hash.toLowerCase().includes(q)) return true;
+            if(b.previousHash && b.previousHash.toLowerCase().includes(q)) return true;
+            if(b.transactions.some(tx => tx.id && tx.id.toLowerCase().includes(q))) return true;
+            if(b.transactions.some(tx => tx.from && tx.from.toLowerCase().includes(q))) return true;
+            if(b.transactions.some(tx => tx.to && tx.to.toLowerCase().includes(q))) return true;
+            return false;
+        });
+        sortFiltered();
+        page = 1;
+        render();
+    }
+
+    function sortFiltered(){
+        const dir = els.sort.value;
+        filtered.sort((a,b) => dir === 'asc' ? a.index - b.index : b.index - a.index);
+    }
+
+    function paginate(arr){
+        const per = parseInt(els.perPage.value,10) || 100;
+        const totalPages = Math.max(1, Math.ceil(arr.length / per));
+        if(page > totalPages) page = totalPages;
+        const start = (page - 1) * per;
+        const slice = arr.slice(start, start + per);
+        els.paging.classList.toggle('hidden', arr.length <= per);
+        els.pageInfo.textContent = `Page ${page}/${totalPages} (${arr.length} blocks)`;
+        return slice;
+    }
+
+    function fmtTime(ts){
+        if(!ts) return 'n/a';
+        try { const d = new Date(ts); return d.toLocaleString(); } catch { return String(ts); }
+    }
+
+    function render(){
+        const toRender = paginate(filtered);
+        els.blocks.innerHTML = '';
+        if(!toRender.length){
+            els.blocks.innerHTML = '<div class="empty">No blocks match.</div>';
+            return;
+        }
+        const frag = document.createDocumentFragment();
+        toRender.forEach(b => {
+            const div = document.createElement('div');
+            div.className = 'block';
+            div.innerHTML = `
+                <header>
+                    <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;">
+                        <span class="badge ${b.index===0?'genesis':'mined'}">${b.index===0?'GENESIS':'BLOCK'}</span>
+                        <strong>#${b.index}</strong>
+                    </div>
+                    <div class="hash">${b.hash || 'no-hash'}</div>
+                    ${b.previousHash ? `<div class="prev">Prev: ${b.previousHash}</div>`:''}
+                    <div style="font-size:.6rem;opacity:.75;">Nonce: ${b.nonce ?? 'n/a'} | Diff: ${b.difficulty ?? 'n/a'} | ${fmtTime(b.timestamp)}</div>
+                </header>
+                <button class="toggleTx" data-open="0">Transactions (${b.transactions.length})</button>
+                <div class="transactions hidden"></div>
+            `;
+            const btn = div.querySelector('.toggleTx');
+            const txWrap = div.querySelector('.transactions');
+            btn.addEventListener('click', () => {
+                if(btn.dataset.open === '0'){
+                    btn.dataset.open = '1';
+                    txWrap.classList.remove('hidden');
+                    if(!txWrap.childElementCount){
+                        b.transactions.forEach(tx => {
+                            const li = document.createElement('div');
+                            li.className='tx';
+                            li.textContent = `${tx.id} ${tx.from||''} -> ${tx.to||''} ${tx.amount||''}`.trim();
+                            txWrap.appendChild(li);
+                        });
+                    }
+                } else {
+                    btn.dataset.open = '0';
+                    txWrap.classList.add('hidden');
+                }
+            });
+            frag.appendChild(div);
+        });
+        els.blocks.appendChild(frag);
+        updateStats();
+        setStatus('Ready');
+    }
+
+    function updateStats(){
+        const height = chain.length ? chain[0].index : 0;
+        const txCount = chain.reduce((a,b)=> a + b.transactions.length, 0);
+        let latestTs = chain.length ? chain[0].timestamp : null;
+        let ago = '';
+        if(latestTs){
+            const diffMs = Date.now() - new Date(latestTs).getTime();
+            const s = Math.floor(diffMs/1000); ago = s < 60 ? `${s}s ago` : `${Math.floor(s/60)}m ago`;
+        }
+        els.stats.textContent = `Height ${height} | Blocks ${chain.length} | TX ${txCount} | Latest ${ago}`;
+        els.cache.textContent = `${chain.length} blocks cached`;
+    }
+
+    async function reload(){
+        try {
+            setStatus('Loading');
+            const data = await fetchChain();
+            chain = data;
+            applyFilters();
+        } catch(err){
+            console.error(err);
+            els.stats.textContent = 'Failed to load chain';
+        }
+    }
+
+    // Event bindings
+    els.search.addEventListener('input', ()=> applyFilters());
+    els.sort.addEventListener('change', ()=> { sortFiltered(); render(); });
+    els.clear.addEventListener('click', ()=> { els.search.value=''; applyFilters(); });
+    els.refresh.addEventListener('click', ()=> reload());
+    els.prev.addEventListener('click', ()=> { if(page>1){ page--; render(); } });
+    els.next.addEventListener('click', ()=> { page++; render(); });
+    els.perPage.addEventListener('change', ()=> { page=1; render(); });
+
+    // Initial load
+    reload();
+})();
+</script>
+</body>
+</html>

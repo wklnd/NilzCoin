@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>NilzCoin Mining Pool</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+    body { font-family: Arial, sans-serif; margin: 1.5rem; background:#10141a; color:#e4e7eb; }
+    h1 { margin-top:0; }
+    form { display:flex; gap:.5rem; margin-bottom:1rem; }
+    input[type=text] { flex:1; padding:.5rem; border:1px solid #334; background:#1b2129; color:#fff; }
+    button { padding:.55rem .9rem; background:#2962ff; color:#fff; border:0; cursor:pointer; }
+    button:disabled { opacity:.5; cursor:not-allowed; }
+    #graphWrapper { margin-top:1rem; display:none; }
+    #chart { width:100%; max-width:800px; height:300px; background:#1b2129; border:1px solid #334; }
+    table { width:100%; border-collapse:collapse; margin-top:1rem; background:#1b2129; display:none; }
+    th, td { padding:.55rem .6rem; text-align:left; border-bottom:1px solid #27313c; font-size:.9rem; }
+    th { background:#222c37; position:sticky; top:0; }
+    tbody tr:hover { background:#22303c; }
+    .tag { font-size:.7rem; background:#2962ff33; padding:2px 6px; border-radius:4px; }
+    #status { font-size:.8rem; margin-left:.5rem; opacity:.8; }
+    .fade-in { animation: fade .4s ease; }
+    @keyframes fade { from {opacity:0; transform:translateY(8px);} to {opacity:1; transform:translateY(0);} }
+</style>
+</head>
+<body>
+<h1>NilzCoin Pool Dashboard</h1>
+<form id="addressForm">
+    <input id="addressInput" type="text" placeholder="Enter wallet address" required />
+    <button type="submit">Load</button>
+    <span id="status"></span>
+</form>
+
+<div id="payoutBox" style="background:#1b2129;border:1px solid #334;padding:.75rem 1rem;margin-bottom:1rem;display:flex;flex-wrap:wrap;gap:.75rem;align-items:center;">
+    <strong>Next Payout:</strong>
+    <span id="payoutCountdown" style="font-variant-numeric:tabular-nums;font-weight:bold;">Loading...</span>
+    <span id="payoutHint" style="opacity:.7;font-size:.75rem;"></span>
+</div>
+
+<div id="earningsBox" style="background:#1b2129;border:1px solid #334;padding:.75rem 1rem;margin-bottom:1rem;display:flex;flex-direction:column;gap:.4rem;">
+    <strong>Earnings Summary</strong>
+    <div style="font-size:.8rem;opacity:.85;">Pool fee (settled / pending): <span id="poolFeeTotals">Loading...</span></div>
+    <div style="font-size:.8rem;opacity:.85;">Miners payout (settled / pending): <span id="minersPayoutTotals">Loading...</span></div>
+    <div style="font-size:.7rem;opacity:.65;">Rounds (settled / pending): <span id="roundCounts">–</span></div>
+    <div style="font-size:.7rem;opacity:.65;">Last settlement: <span id="lastSettlementTs">–</span></div>
+</div>
+
+<div id="info">
+    <p>NilzPool is currently the only pool for NilzCoin(nilz), providing reliable mining services and real-time statistics.</p>
+    <p>Current mining fee (1,5%) applies to all rewards.</p>
+    <p>NOTE: NilzPool is a solopool!</p>
+    <p>To start mining, configure your miner with the pool address and your wallet address. Example configuration:</p>
+    <pre style="background:#1b2129; padding:1rem; border:
+1px solid #334; overflow-x:auto;">{
+    "wallet_address": "your_wallet_address_here",
+    "pool_address": "http://127.0.0.1:8000",
+    "worker_name": "worker1",
+    "threads": 4,
+    "log": {
+        "level": "info",
+        "file": "miner.log"
+    }
+}</pre>
+    <p>Replace <code>your_wallet_address_here</code> with your actual NilzCoin wallet address.</p>
+</div>
+
+<div id="graphWrapper" class="fade-in">
+    <canvas id="chart" width="800" height="300"></canvas>
+</div>
+
+<table id="minersTable" class="fade-in">
+    <thead>
+        <tr>
+            <th>Miner</th>
+            <th>Shares</th>
+            <th>Share Rate (per min)</th>
+            <th>Blocks</th>
+            <th>Last Share</th>
+            <th>Uptime</th>
+        </tr>
+    </thead>
+    <tbody id="minersBody"></tbody>
+</table>
+
+<script>
+const form = document.getElementById('addressForm');
+const input = document.getElementById('addressInput');
+const statusEl = document.getElementById('status');
+const graphWrapper = document.getElementById('graphWrapper');
+const canvas = document.getElementById('chart');
+const ctx = canvas.getContext('2d');
+const minersTable = document.getElementById('minersTable');
+const minersBody = document.getElementById('minersBody');
+const payoutCountdownEl = document.getElementById('payoutCountdown');
+const payoutHintEl = document.getElementById('payoutHint');
+const poolFeeTotalsEl = document.getElementById('poolFeeTotals');
+const minersPayoutTotalsEl = document.getElementById('minersPayoutTotals');
+const roundCountsEl = document.getElementById('roundCounts');
+const lastSettlementTsEl = document.getElementById('lastSettlementTs');
+
+let nextPayoutTs = null; // Date object
+let payoutIntervalSeconds = null;
+
+async function fetchNextPayout() {
+    try {
+        const r = await fetch('/next_payout');
+        if(!r.ok) throw new Error('next_payout endpoint error');
+        return r.json();
+    } catch (e) {
+        console.error(e);
+        return null;
+    }
+}
+
+function formatRemaining(sec){
+    const h = Math.floor(sec/3600);
+    const m = Math.floor((sec%3600)/60);
+    const s = sec%60;
+    return [h,m,s].map(v=>String(v).padStart(2,'0')).join(':');
+}
+
+function updateCountdown(){
+    if(!nextPayoutTs){
+        payoutCountdownEl.textContent = '—';
+        return;
+    }
+    const now = new Date();
+    const diffMs = nextPayoutTs - now;
+    const diffSec = Math.max(Math.floor(diffMs/1000),0);
+    payoutCountdownEl.textContent = formatRemaining(diffSec);
+    if(diffSec === 0){
+        payoutCountdownEl.style.color = '#ffb300';
+    } else {
+        payoutCountdownEl.style.color = '#fff';
+    }
+}
+
+async function refreshNextPayout(){
+    const info = await fetchNextPayout();
+    if(!info){
+        payoutCountdownEl.textContent = 'Error';
+        return;
+    }
+    nextPayoutTs = new Date(info.next_payout_timestamp);
+    payoutIntervalSeconds = info.interval_seconds;
+    payoutHintEl.textContent = info.overdue ? 'Payout window reached – settlement may occur soon.' : `Interval ${Math.round(payoutIntervalSeconds/60)}m (informational)`;
+    updateCountdown();
+}
+
+async function fetchEarnings(){
+    try {
+        const r = await fetch('/earnings');
+        if(!r.ok) throw new Error('earnings endpoint error');
+        const data = await r.json();
+        poolFeeTotalsEl.textContent = `${data.pool_fee_settled} / ${data.pool_fee_pending}`;
+        minersPayoutTotalsEl.textContent = `${data.miners_payout_settled} / ${data.miners_payout_pending}`;
+        roundCountsEl.textContent = `${data.settled_rounds} / ${data.pending_rounds}`;
+        lastSettlementTsEl.textContent = data.latest_settlement_timestamp ? new Date(data.latest_settlement_timestamp).toLocaleString() : 'None';
+    } catch(e){
+        console.error(e);
+        poolFeeTotalsEl.textContent = 'Error';
+        minersPayoutTotalsEl.textContent = 'Error';
+    }
+}
+
+// Initial load & timers
+refreshNextPayout();
+setInterval(updateCountdown, 1000); // tick
+setInterval(refreshNextPayout, 60000); // refresh server info each minute
+fetchEarnings();
+setInterval(fetchEarnings, 60000);
+
+async function fetchStats(address) {
+    const encoded = encodeURIComponent(address);
+    const response = await fetch(`/stats?wallet=${encoded}&history_minutes=60`);
+    if (!response.ok) {
+        throw new Error('Pool API error: ' + response.statusText);
+    }
+    return response.json();
+}
+
+function buildHistoryPoints(miners) {
+    const buckets = new Map();
+    miners.forEach(miner => {
+        (miner.history || []).forEach(point => {
+            const key = point.timestamp;
+            buckets.set(key, (buckets.get(key) || 0) + point.shares);
+        });
+    });
+    const ordered = Array.from(buckets.entries()).sort(([a],[b]) => a.localeCompare(b));
+    return ordered.map(([timestamp, shares]) => ({ t: new Date(timestamp), v: shares }));
+}
+
+function drawChart(data) {
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    if (!data.length) {
+        ctx.fillStyle = '#8899aa';
+        ctx.font = '14px Arial';
+        ctx.fillText('No recent shares yet for this wallet.', 40, canvas.height / 2);
+        return;
+    }
+    const pad = 30;
+    const w = canvas.width - pad*2;
+    const h = canvas.height - pad*2;
+    const vals = data.map(d => d.v);
+    const min = Math.min(...vals);
+    const max = Math.max(...vals);
+    const range = max - min || 1;
+    // Axes
+    ctx.strokeStyle = '#44515f';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(pad, pad);
+    ctx.lineTo(pad, pad + h);
+    ctx.lineTo(pad + w, pad + h);
+    ctx.stroke();
+    // Grid + labels
+    ctx.fillStyle = '#8899aa';
+    ctx.font = '11px Arial';
+    for (let i=0;i<=5;i++){
+        const yv = min + range * (i/5);
+        const y = pad + h - (yv - min)/range*h;
+        ctx.strokeStyle = '#2a343f';
+        ctx.beginPath();
+        ctx.moveTo(pad, y);
+        ctx.lineTo(pad + w, y);
+        ctx.stroke();
+        ctx.fillText(yv.toFixed(1), 4, y+4);
+    }
+    // Line
+    ctx.strokeStyle = '#2962ff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    data.forEach((p,i) => {
+        const x = pad + (i/(data.length-1 || 1))*w;
+        const y = pad + h - (p.v - min)/range*h;
+        if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    });
+    ctx.stroke();
+    // Fill
+    ctx.fillStyle = 'rgba(41,98,255,0.15)';
+    ctx.lineTo(pad + w, pad + h);
+    ctx.lineTo(pad, pad + h);
+    ctx.closePath();
+    ctx.fill();
+    // Latest label
+    const last = data[data.length-1];
+    const lastX = pad + w;
+    const lastY = pad + h - (last.v - min)/range*h;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(lastX,lastY,4,0,Math.PI*2);
+    ctx.fill();
+    ctx.fillText(last.v.toFixed(0)+' shares/min', lastX - 80, lastY - 10);
+}
+
+function renderMiners(miners) {
+    minersBody.innerHTML = '';
+    if (!miners.length) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 6;
+        td.textContent = 'No miners registered for this wallet yet.';
+        tr.appendChild(td);
+        minersBody.appendChild(tr);
+        return;
+    }
+    miners.forEach(m => {
+        const tr = document.createElement('tr');
+        const tdId = document.createElement('td');
+        tdId.textContent = `${m.name} (${m.miner_id.slice(0,6)})`;
+        const tdShares = document.createElement('td');
+        tdShares.textContent = m.shares;
+        const tdRate = document.createElement('td');
+        tdRate.textContent = m.share_rate_per_min.toFixed(2);
+        const tdBlocks = document.createElement('td');
+        tdBlocks.textContent = m.blocks;
+        const tdLast = document.createElement('td');
+        tdLast.textContent = m.last_share_at ? fmtTimestamp(m.last_share_at) : '—';
+        const tdUp = document.createElement('td');
+        tdUp.textContent = fmtDuration(Math.floor(m.uptime_seconds/60));
+        tr.append(tdId, tdShares, tdRate, tdBlocks, tdLast, tdUp);
+        minersBody.appendChild(tr);
+    });
+}
+
+function fmtDuration(mins){
+    const d = Math.floor(mins/1440);
+    const h = Math.floor((mins%1440)/60);
+    const m = mins%60;
+    return (d?d+'d ':'') + (h?h+'h ':'') + (m?m+'m':'');
+}
+
+function fmtTimestamp(ts){
+    const date = new Date(ts);
+    return date.toLocaleString();
+}
+
+form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const address = input.value.trim();
+    if(!address) return;
+    statusEl.textContent = 'Loading...';
+    form.querySelector('button').disabled = true;
+    try {
+        const data = await fetchStats(address);
+        if (!data.miners.length) {
+            minersTable.style.display = 'table';
+            graphWrapper.style.display = 'block';
+            drawChart([]);
+            renderMiners([]);
+            statusEl.textContent = 'No miners for this wallet yet';
+            return;
+        }
+        const points = buildHistoryPoints(data.miners);
+        drawChart(points);
+        renderMiners(data.miners);
+        graphWrapper.style.display = 'block';
+        minersTable.style.display = 'table';
+        statusEl.textContent = 'Updated ' + new Date().toLocaleTimeString();
+    } catch(err){
+        statusEl.textContent = 'Error loading data';
+        console.error(err);
+    } finally {
+        form.querySelector('button').disabled = false;
+    }
+});
+
+// Optional: auto-refresh every 60s if data visible
+setInterval(async () => {
+    if(graphWrapper.style.display !== 'block') return;
+    const address = input.value.trim();
+    if(!address) return;
+    try {
+        const data = await fetchStats(address);
+        const points = buildHistoryPoints(data.miners);
+        drawChart(points);
+        renderMiners(data.miners);
+        statusEl.textContent = 'Auto-refreshed ' + new Date().toLocaleTimeString();
+    } catch (err) {
+        console.error(err);
+        statusEl.textContent = 'Auto-refresh failed';
+    }
+}, 60000);
+</script>
+</body>
+</html>

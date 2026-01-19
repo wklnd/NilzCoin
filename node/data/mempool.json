@@ -1,0 +1,13 @@
+[
+  {
+    "from": "nilzNWH4DWSUFWbP94NyafGbfd5n51N6JWbE8y",
+    "to": "nilzNWDDF6gwLHRENEVHPqdj8SqyaviJSo51Pk",
+    "amount": "49.25",
+    "timestamp": "2025-11-26T12:26:44Z",
+    "nonce": "7af3f659591eeb01",
+    "signature": "d7d30f88d759e942aadee4a27f06b9b1d2ac5d6360803a0d92b12cab1a1639f2f86b9d8bd03e2546543b4dcd24d1d2794d6f37054ede2c70d136730328f4771d",
+    "public_key": "04e041ae8d294be1bb6421fd1a030aee21e9d53d3b8752549422228bae5b0c51dcf7f7c34c7d1d161bf5a686b86391b6fd961c7d00698c8d71099aa4da7fbc6805",
+    "hash": "7363955e02832e95e22148115273a1f07157273619985c3c755b6a5bf99f5ac0",
+    "type": "transfer"
+  }
+]
