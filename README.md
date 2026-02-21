@@ -1,4 +1,6 @@
 # NilzCoin
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/wklnd/NilzCoin)
+---
 
 An end-to-end, approachable cryptocurrency proof‑of‑concept: wallet + node + pool + miner, with optional public relays and a website faucet. It demonstrates a full transaction lifecycle (create → broadcast → mine → confirm) with clear, hackable Python services.
 
