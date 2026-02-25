@@ -6,6 +6,19 @@ An end-to-end, approachable cryptocurrency proof‑of‑concept: wallet + node +
 
 This README covers what each service does, how to configure it, run it locally, and how to host it.
 
+## What's Next for NilzCoin?
+
+NilzCoin development is currently paused while other projects are being prioritized. The purpose of this project is educational: to gain a deeper understanding of how blockchain systems work by implementing core components from scratch.
+
+### Planned Improvements
+
+- Refactor the core blockchain structure for better separation of concerns  
+- Expand block validation and transaction verification logic  
+- Implement digital signatures for transactions  
+- Add persistent storage instead of relying on in-memory state  
+- Simulate basic peer-to-peer networking between nodes  
+- Introduce stress testing and performance benchmarking  
+
 ## Quick Start
 
 Requirements:
